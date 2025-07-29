@@ -1,0 +1,826 @@
+Skip to content
+Chat history
+
+You said:
+I am building an agent marketplace platform that will host and orchestrate multiple LLM agents, each with different skills and capabilities. The platform will: (support agent discovery, registration, and invocation). Integrate with a separate MCP (Model Context Protocol) server for tool access (via a fastMCP server). Expose agents and their skills using the Agent2Agent (A2A) protocol, including agent cards, task management, streaming, and artifact exchange. This marketplace platform will be a fastAPI backend (front end to be designed prob some sort of next.js or w.e. not improtant at the moment). We are only concerned with the fastAPI backend and the fastMCP tool server. Please generate a detailed technical specification and architecture plan for this system, covering 1. The recommended API endpoints and data models (including how to align with A2A JSON schemas for tasks, messages, artifacts, and agent cards). How to structure agent registration, discovery, and invocation in a way that is A2A-compliant. 3. How to integrate the fastMCP MCP server for tool access, and how agents should call tools in a way that fits wtih A2A workflows (my current plan is to hae agents make tool calls to python functions which utlize the fastMCP client) 4. How to support multi-turn, streaming,a nd artifcact-based interactions between agents and clients 5. Security and Authentication best practices for both A2A and MCP integration. 6. Any additional recommendations for scalability, extensibility, and compliance with open standards. Please include diagrams, example payloads, and a checklist of requiremetns for each agent to be compatible with this architecture. 
+ChatGPT said:
+Thanks for the detailed overview. Before I generate the technical specification and architecture plan, could you please clarify the following:
+
+What deployment setup are you targeting (e.g., cloud provider, container orchestration like Kubernetes, serverless)?
+
+Will agents be running as external services or hosted within your platform?
+
+What kind of tasks are agents expected to perform (e.g., text generation, data analysis, automation)?
+
+Is streaming based on WebSockets, SSE, or another protocol?
+
+Do you have any preference for the authentication mechanism (e.g., OAuth2, API key, JWT)?
+
+Are you aiming to support third-party agent developers to onboard and publish their agents?
+
+This will help tailor the specification to your needs.
+
+You said:
+1. right now just localhost but it will be 2 endpoints on a VM, then container orchestration on kubernetes, but this is a UBS project for me, so devops teams will handle this properly. I just must make the mcp and fastAPI servers work on localhost(s) 2. SHould be hosted on the fastAPI server 3. Things like that, internal UBS classifcation, document verification, data analysis ,some automation. 4. Likely SSE given fastMCP support 5. I think you can recommend what you think is best but stay light on this since we will likely default to UBS standard auth proactices (which iirc is JWT) 6. This is the medium term goal. 
+ChatGPT said:
+Great, thank you! I’ll generate a detailed technical specification and architecture plan for your FastAPI-based agent marketplace platform, including A2A-compliant APIs and models, fastMCP integration, multi-turn streaming support via SSE, and security considerations with JWT. I’ll also include diagrams, example payloads, and a compatibility checklist for agent developers. I’ll let you know when it’s ready.
+
+Research completed in 8m · 37 sources · 58 searches
+Technical Architecture for Agent Marketplace with FastAPI and fastMCP
+
+Agent Marketplace Architecture and Technical Specification
+Overview of the Agent Marketplace
+The proposed platform is a FastAPI-based backend that hosts multiple AI agents and orchestrates their interactions. It follows open standards for interoperability, notably Agent2Agent (A2A) for agent communication and Model Context Protocol (MCP) for tool access. A2A provides the “language” and APIs for agents to discover each other, negotiate tasks, exchange messages, and deliver outputs, while MCP standardizes how agents invoke external tools and data sources
+huggingface.co
+. This combination allows our agents to collaborate with each other and leverage tools securely – for example, two agents can converse via A2A even as they individually call MCP tools to fulfill subtasks
+blog.dailydoseofds.com
+. High-level architecture: The client (user or a calling “client agent”) communicates with the FastAPI Agent Marketplace over A2A (HTTP + JSON-RPC, with optional SSE streaming). The FastAPI backend hosts multiple agents (with a registry and their Agent Cards) and connects to a separate fastMCP server for tool execution. Agents internally call the fastMCP client (Python library) to invoke tools, and incorporate the results back into A2A messages/artifacts sent to clients. Each agent is exposed as an A2A-compliant service endpoint (e.g. a base URL on the FastAPI server). The platform supports:
+Agent Registration & Discovery: Agents register by providing an Agent Card (a JSON metadata file describing the agent’s identity and capabilities). The marketplace stores these and exposes them at a well-known endpoint for discovery.
+Task Invocation & Messaging: Clients (or other agents) can invoke a remote agent by sending it a task request via JSON-RPC calls (over HTTP). The protocol supports both immediate responses and long-running tasks with state updates.
+Streaming & Artifacts: Agents can stream partial results (using Server-Sent Events) and return rich outputs (files or data artifacts) as part of task completion.
+Tool Integration: Agents have access to external tools through a fastMCP server. An agent’s logic can call Python functions (backed by the fastMCP client) to perform actions like data lookup, classification, etc., and then return those results in the conversation.
+Security: All interactions require authentication (e.g. JWT bearer tokens) and follow enterprise security practices. Agents advertise their auth requirements in their Agent Cards, and the platform enforces them on each call.
+This architecture ensures compliance with emerging standards so that our agents remain interoperable and extensible. A2A communication uses standard web protocols (HTTP, JSON-RPC 2.0, SSE)
+ibm.com
+, and MCP provides a uniform “plug” for tools
+huggingface.co
+. Next, we detail the API design and data models aligning with A2A, how agent lifecycle is managed, integration with the fastMCP tool server, support for multi-turn streams/artifacts, and security considerations.
+API Endpoints and Data Models (A2A-Aligned)
+To align with the A2A protocol, the FastAPI backend will implement endpoints and data structures that conform to A2A’s JSON schemas for Agent Cards, Tasks, Messages, and Artifacts. The key API endpoints include:
+Agent Card Discovery: GET /agents/{agent_id}/.well-known/agent.json – Returns the agent’s Agent Card (in JSON). This is the canonical public descriptor of the agent, akin to an OpenAPI document for the agent
+medium.com
+huggingface.co
+. The Agent Card includes metadata like the agent’s name, description, version, base URL, supported skills, I/O formats, and required auth. (The {agent_id} could be an agent name or UUID assigned at registration.)
+Agent Listing (Registry): GET /agents – (Optional) Returns a list of available agents in the marketplace. This could include basic info or the full Agent Cards for each agent. For example, it might return an array of {id, name, description, ...} or even embed each agent’s card JSON. This helps users or client-agents discover what agents exist. (In A2A, discovery is typically done by directly fetching known agent URLs, but a central index can be helpful for browsing.)
+Task Invocation (JSON-RPC Endpoint): POST /agents/{agent_id}/ – This is the primary endpoint to send requests to an agent, using JSON-RPC 2.0 payloads. All A2A methods (like starting a task, streaming, or canceling) are invoked via this single HTTP endpoint
+docs.telex.im
+. The request body must include {"jsonrpc": "2.0", "method": "...", "params": {…}, "id": ...} and the response will contain a JSON-RPC result or error. In our design:
+method: "message/send" – Submit a task or message to the agent (non-streaming mode). The params include a Message object, which has a role and one or more content parts. For example, a client might call message/send with a user role message asking a question. The server (agent) will process and respond either with a final answer or an initial task acknowledgment.
+method: "message/stream" – Like above, but indicates the client wants a streaming response. The server will handle this by upgrading to an SSE response (detailed below in the streaming section).
+method: "tasks/get" – Query the status and data of an existing task by ID (for polling scenarios)
+a2aprotocol.ai
+a2aprotocol.ai
+.
+method: "tasks/cancel" – Cancel an ongoing task (if supported)
+a2aprotocol.ai
+.
+method: "tasks/pushNotificationConfig/set" (and /get) – Register a webhook callback URL for push notifications on task updates
+a2aprotocol.ai
+.
+Using a single POST endpoint for all JSON-RPC methods keeps the API surface minimal and A2A-compliant
+docs.telex.im
+. Internally, the FastAPI app will route the request based on the "method" field (e.g. to a handler for message/send, one for message/stream, etc.)
+docs.telex.im
+docs.telex.im
+. This design cleanly mirrors the A2A specification’s method definitions. Data Models: We adopt A2A’s standard JSON schema for all relevant data structures so that our agents produce and consume messages exactly as expected. Key models include:
+AgentCard: A JSON object summarizing an agent’s capabilities and how to connect to it. It typically contains:
+name (human-readable name of the agent), description, version, and url (the base URL where this agent’s A2A interface is hosted)
+a2aprotocol.ai
+.
+protocolVersion (A2A version, e.g. "0.2.5").
+skills: a list of AgentSkill entries. Each skill has an id (unique identifier), name, description of what the agent can do, optional tags for categorization, and example usage strings
+a2aprotocol.ai
+. For instance, an agent might have a skill with id: "doc_classification" and tags ["NLP","classification"] indicating it classifies documents. Skill definitions help orchestrators route tasks to the right agent
+medium.com
+.
+defaultInputModes and defaultOutputModes: lists of MIME types or content-types the agent expects for input and produces for output by default
+medium.com
+. For example, ["text/plain"] for input and output if it mainly handles text. This allows content negotiation up-front.
+capabilities: an AgentCapabilities object advertising support for features like streaming and push notifications
+a2aprotocol.ai
+a2aprotocol.ai
+. For instance, "streaming": true if the agent can stream partial results, and "pushNotifications": true if it can send webhook callbacks. (Our platform will set these flags based on each agent’s implemented features.) It can also list any protocol extensions supported.
+securitySchemes and security: describes the authentication the agent requires, following OpenAPI conventions
+ibm.com
+. For example, it might include a scheme for Bearer JWT tokens or API keys. This tells clients how to authenticate when calling the agent.
+provider: optional info about the agent’s provider/owner (e.g. organization name, contact URL)
+a2aprotocol.ai
+. In our internal case, this could be "organization": "UBS" for all, or specific team info if needed.
+Example: An Agent Card might look like:
+{
+  "name": "Document Analyzer",
+  "description": "Analyzes and classifies documents for internal compliance.",
+  "version": "1.0",
+  "url": "https://api.mycompany.com/agents/doc-analyzer/",
+  "protocolVersion": "0.2.5",
+  "skills": [
+    {
+      "id": "classify_doc",
+      "name": "Document Classification",
+      "description": "Classifies a document into risk categories.",
+      "tags": ["classification", "compliance", "NLP"],
+      "examples": ["Classify this PDF document's risk level."],
+      "inputModes": ["text/plain", "application/pdf"],
+      "outputModes": ["text/plain", "application/json"]
+    }
+  ],
+  "capabilities": { "streaming": true, "pushNotifications": true },
+  "defaultInputModes": ["text/plain"],
+  "defaultOutputModes": ["text/plain"],
+  "securitySchemes": {
+    "BearerAuth": {
+      "type": "http",
+      "scheme": "bearer",
+      "description": "JWT Authorization header using the Bearer scheme"
+    }
+  },
+  "security": [{ "BearerAuth": [] }]
+}
+This is a hypothetical example, but it includes the typical fields. Notably, it specifies that this agent supports streaming and webhooks, and requires a Bearer JWT token for access. The Agent Card is essentially the agent’s “business card” advertising what it can do
+ibm.com
+ and how to interact with it.
+Task: Represents a unit of work (a conversation or job) handled by an agent. A Task has a unique id and a lifecycle state that progresses through stages like "submitted", "working", "input-required", "completed", "failed", etc
+ibm.com
+. Tasks may be short-lived or long-running. The Task object can also include:
+status: a TaskStatus object with the current state and (optionally) a status message or code. (E.g. state = working with a message “Still processing…”)
+history: an array of Message objects comprising the conversation history or steps taken so far
+a2aprotocol.ai
+a2aprotocol.ai
+. (This is useful for multi-turn tasks – the agent can include prior exchanges in the Task record.)
+artifacts: an array of Artifact objects that have been produced for this task
+a2aprotocol.ai
+a2aprotocol.ai
+. An artifact could be a file, image, or structured result generated as output.
+metadata: optional free-form info (could include timestamps or custom fields).
+contextId: an identifier for a broader context if multiple tasks are linked (not always used, but A2A supports grouping by context).
+In A2A, when a client first sends a message/send, the server may respond with a Task object if it created a new task (including an id and initial status)
+a2aprotocol.ai
+. Tasks allow multi-turn interactions and tracking long processes
+ibm.com
+. For example, the first response might indicate status: working for a long job, and the client can then poll tasks/get or await push/stream updates until it’s completed
+a2aprotocol.ai
+.
+Message: A Message is the fundamental unit of communication – basically one chat turn or one informational update. Each Message has:
+a role – either "user" (if it originated from the client side) or "agent" (if from the agent/remote side)
+ibm.com
+ibm.com
+. This corresponds to who is “speaking” in the conversation.
+a messageId (unique ID for the message, e.g. a UUID).
+parts – an array of content parts that make up the message
+ibm.com
+. A message can have multiple parts of possibly different types. For instance, an agent’s message could include a text part “Here is the report” and a file part containing the actual report PDF.
+taskId (optional) – if this message is associated with a specific task. In our implementation, when continuing a multi-turn task, the client’s follow-up messages will include the taskId so the agent knows it’s part of an ongoing task thread.
+kind – usually "message" for a normal message exchange
+a2aprotocol.ai
+ (A2A sometimes treats Message as a kind of event).
+Other metadata: contextId if part of a larger context, referenceTaskIds if referring to results of other tasks, etc., but these are more advanced features.
+A Part is the payload of a message or artifact. There are three main part types in A2A:
+TextPart: contains a simple text string (with kind: "text")
+a2aprotocol.ai
+.
+FilePart: represents a file or binary content. It can either include the file bytes in-line (base64 encoded) or a URI to download the file, plus a MIME type and filename. We will typically use URIs for larger artifacts (discussed later).
+DataPart: carries structured JSON data (with kind: "data"), useful for e.g. an agent returning a JSON result or form data
+ibm.com
+.
+Each Part may also have its own metadata (for example, a FilePart might have a content size or a thumbnail link). In JSON, Parts are often represented as objects like {"kind": "text", "text": "…content…"} or {"kind": "file", "uri": "https://.../file.png", "mimeType": "image/png", "name": "file.png"}.
+Artifact: AArtifact is any output artifact produced by the agent as the result of a task
+huggingface.co
+. Think of artifacts as the deliverables: an artifact could be a report document, an image, a data blob (JSON), etc. Artifacts, like messages, are composed of parts (often FileParts or DataParts). They have an artifactId and may have a name or description. In the A2A protocol, artifacts are usually attached to the Task object or sent in messages to the client agent. Our API doesn’t have a separate artifact-fetch endpoint by default; instead, artifact content is conveyed either directly in the JSON or via links:
+For small textual or data artifacts, the agent might include them directly as DataParts or TextParts in the JSON response.
+For large files, the Artifact’s FilePart can use a URI field that points to a download location
+a2aprotocol.ai
+. In our platform, we will generate secure URLs for artifact files (or an endpoint to download them) and include that in the artifact part. This way, the client can retrieve the file when needed. For example, an artifact with name: "analysis.pdf" might include uri: "https://agents.mycompany.com/artifacts/12345?token=abc".
+Artifacts can also be streamed incrementally: the agent could send partial artifact content in chunks (more on this in streaming section). But logically, at task completion, you can think of the Task as containing the full array of artifacts produced.
+Example JSON-RPC Interaction: Below is an example of a client invoking an agent and the agent responding, to illustrate the data structures:
+Client Request: The user asks an agent for a joke (non-streaming). The client POSTs to /agents/joke-agent/:
+{
+  "jsonrpc": "2.0",
+  "id": "req-001",
+  "method": "message/send",
+  "params": {
+    "message": {
+      "role": "user",
+      "parts": [
+        { "kind": "text", "text": "Tell me a joke." }
+      ],
+      "messageId": "9229e770-767c-417b-a0b0-f0741243c589"
+    }
+  }
+}
+This corresponds to the user’s message. (If this were continuing an existing task, we would add "taskId": "<task-id>" inside the message to tie it to that task.)
+Agent Response: The agent processes this quickly and returns a result in the HTTP response:
+{
+  "jsonrpc": "2.0",
+  "id": "req-001",
+  "result": {
+    "messageId": "363422be-b0f9-4692-a24d-278670e7c7f1",
+    "parts": [
+      { "kind": "text", "text": "Why did the chicken cross the road? To get to the other side!" }
+    ],
+    "role": "agent",
+    "kind": "message",
+    "contextId": "c295ea44-7543-4f78-b524-7a38915ad6e4"
+  }
+}
+This is a direct message response (with kind: "message") containing the joke text. The agent chose to answer in one go, so it did not create a long-lived task. (If it had treated this as a task, the result could instead be a Task object with an artifact. In fact, the A2A spec allows either style
+a2aprotocol.ai
+a2aprotocol.ai
+. For simplicity, this agent just returned a message.)
+In summary, the API endpoints revolve around retrieving agent cards and sending JSON-RPC calls to agents. By adhering closely to the A2A schemas, we ensure any standard A2A client can interact with our platform. The AgentCard gives clients all they need to know (capabilities, auth, endpoint URL)
+ibm.com
+, and the message/task schema defines the payloads the clients should send and will receive (roles, parts, etc.). The next section covers how agents are registered and how these endpoints are used in practice for discovery and invocation.
+Agent Registration, Discovery and Invocation (A2A Compliance)
+Agent Registration: To add an agent to the marketplace, a developer or admin will register it with the backend. In practice, this could be done via an admin API or configuration file. The registration process involves providing:
+The agent’s metadata (name, description, version, etc.) and capabilities, which become its Agent Card.
+The implementation or logic of the agent (e.g. linking it to a class or service that can handle its tasks). In our FastAPI design, this might mean adding a handler for the agent’s invocation or loading a model checkpoint, etc.
+On registration, the backend will assign a unique {agent_id} (if not provided) and store the Agent Card JSON (likely in a database or in-memory registry). The Agent Card JSON must be kept up-to-date as it is the contract with clients. We will expose this card at /.well-known/agent.json under the agent’s base path
+huggingface.co
+. (Following A2A best practices, using the well-known URL allows client agents to fetch the card in a standardized way without prior configuration.) For example, if we register “DocAnalyser” agent with id doc-analyzer, its card is served at /agents/doc-analyzer/.well-known/agent.json. We will also include a top-level GET /agents that lists available agents, which can aid in manual discovery or UI listing. (A2A itself doesn’t mandate a central registry, but internally this is useful.) Agent Discovery: In an A2A workflow, a client agent (or an end-user application) looking to fulfill a task will query agent cards to find a suitable agent
+ibm.com
+. In our system, discovery can happen in two ways:
+Known agent endpoint: If the client already knows the specific agent it wants (by name or ID), it can directly GET that agent’s .well-known/agent.json. This will return the public Agent Card, which includes the agent’s skills and the URL to send tasks
+huggingface.co
+. The client can verify from the card whether this agent can handle the desired skill (by checking the skills list, tags, or examples) and what authentication is needed.
+Searching the registry: If the client doesn’t know which agent to use, it can call GET /agents on our marketplace. We can support query parameters to filter by skill tags or names. The response could be a list of agent entries or cards, from which the client picks one. For example, a client could search for agents with skill tag "automation" or name "verification". Our registry could leverage the skills[*].tags and skills[*].examples defined in Agent Cards for this filtering
+medium.com
+.
+Once an agent is chosen, the client uses the service endpoint URL from the Agent Card (the url field, e.g. "https://.../agents/doc-analyzer/") to communicate with that agent
+a2aprotocol.ai
+. The agent’s card also tells the client if it should use streaming or not by default (defaultOutputModes), and whether the agent supports SSE or needs webhooks
+medium.com
+. Invocation (Task Lifecycle): To invoke an agent, the client agent will formulate a Task request. In A2A terms, the client sends a message/send RPC to the remote agent’s endpoint
+huggingface.co
+ (or message/stream if it wants streaming). On our platform, when such a request arrives at POST /agents/{id}/:
+The FastAPI handler will first authenticate the request (ensuring the client has provided a valid token or key as required by the agent’s security policy).
+It will parse the JSON-RPC payload. Based on the "method", it dispatches to the corresponding logic:
+For message/send: The platform will create a new Task object in memory (or database) and assign it an ID (usually a UUID). The initial user Message from params is recorded in the task’s history. Then it calls the actual agent implementation to handle the request. This could involve running an LLM prompt or executing custom code. We wrap this in a Task manager component that can track the state (submitted → working → completed, etc.).
+If the agent can complete immediately, it will produce an answer (possibly with artifacts) and we package that into either a direct Message result or a Task result. In many cases, we will return a Task object even for quick completions, but mark it completed along with the output artifact
+a2aprotocol.ai
+. (This is what the A2A spec calls task-based response
+a2aprotocol.ai
+.)
+If the agent needs more time or multiple steps, we will return a Task with state working (and maybe a partial result or just an acknowledgment). The client can then poll or wait for updates.
+For message/stream: The process is similar, but the response handling is different (streaming via SSE, covered later). We will create a Task, start processing, and stream updates as they become available.
+For tasks/get: We look up the requested Task ID in our task store and return its current status and any available messages/artifacts. (If tasks are stored in a DB or cache, we fetch from there. If not found, return an error TaskNotFound as per A2A spec
+a2aprotocol.ai
+.)
+For tasks/cancel: We mark the task as canceled (if it’s in a cancel-able state) and propagate a cancel signal to the agent’s process (for instance, stopping an LLM generation). The response would typically be a confirmation or the final Task state (canceled)
+a2aprotocol.ai
+.
+For push notification config: We record the provided webhook URL and auth token in the task or agent context. Our platform might store a mapping of that Task (or all tasks for that client session) to a callback URL. This is used later to POST notifications (explained in streaming section).
+Task Lifecycle & Multi-turn: A2A tasks can handle multi-turn interactions gracefully. Our platform will implement the input-required state to support this. For example, suppose an agent needs more information from the user (client) to complete the task:
+The agent can respond with a Task status input-required and include a Message from the agent asking for details
+a2aprotocol.ai
+a2aprotocol.ai
+. In our JSON-RPC response, result would be a Task object with status.state = "input-required" and an agent message embedded (the status.message field or included in history).
+The client (or user) sees that question and then can provide the missing info by calling message/send again with a new user message and the same Task ID. Our API will detect that the params contain a taskId, and route this message to the existing task’s context. We’ll append it to the Task history and resume processing the task.
+The agent then continues work with the new input and eventually returns either another input-required (for further clarification) or a completed state with the final result
+a2aprotocol.ai
+a2aprotocol.ai
+.
+Throughout this lifecycle, the platform’s Task manager keeps track of the state machine: submitted → working → (maybe input-required and back to working) → completed/failed/canceled
+ibm.com
+. Each state change or new message can trigger an event to the client (via SSE or webhook as configured). This A2A-compliant structure ensures the client and agent stay in sync without the client having to poll unnecessarily. The A2A task model is designed for exactly these scenarios of complex, possibly long, interactions
+ibm.com
+. Our implementation will fully leverage that:
+We assign unique IDs and preserve history, so if a client disconnects and reconnects, it can call tasks/get to retrieve the state and resume.
+We support explicit cancellation via the API.
+We treat each agent as an opaque service: the client doesn’t need to know how the agent works internally (what model or algorithm, what tools it uses), just what skills it offers and how to talk to it
+ibm.com
+. This opacity preserves flexibility – e.g., an agent might even delegate subtasks to another agent under the hood, but from the A2A perspective it’s just handling the task.
+A2A Compliance Considerations: To be fully A2A-compliant, we adhere to the JSON-RPC method naming and data schemas from the official spec:
+Use exact method names ("message/send", "message/stream", "tasks/get", etc.) and structure our requests/responses accordingly, so any A2A client SDK could call our agents and parse responses.
+Serve the Agent Card at /.well-known/agent.json (as recommended) so that it can be automatically discovered
+huggingface.co
+. The Agent Card will include a link to the base URL (in the url field), and auth schemes as needed (e.g. an OAuth client could read the OpenID Connect info in the card).
+Ensure that when our agent returns messages or artifacts, they conform to the schema (e.g. use kind: "text" or "file" as appropriate, include messageId and taskId fields where needed, etc.). We might use the A2A Python SDK’s models to validate outgoing responses to avoid mistakes.
+Implement negotiation of content types if needed: e.g., if a client specifically requests an output format via accept metadata, our agent can respect that. The Agent Card’s defaultOutputModes helps avoid needing to negotiate every time
+medium.com
+, but if an agent can output multiple formats (say HTML vs plain text), we could allow a parameter for that in the request.
+Use HTTP SSE for streaming and HTTP status codes appropriately (200 for OK responses, 400/500 for errors, etc.), as A2A is built on HTTP semantics.
+With these in place, any agent integrated into the marketplace is essentially a fully compliant A2A server
+ibm.com
+, and the marketplace as a whole acts as an A2A server hosting many agents (and potentially an A2A client if agents talk among themselves, though that’s an extension). Next, we discuss how tool usage via MCP is integrated into an agent’s operation in this framework.
+Integrating fastMCP for Tool Access
+One of the core advantages of our platform is that agents can invoke external tools and data through the fastMCP (Model Context Protocol) server. MCP provides a standardized interface (via JSON-RPC or REST) for tools, analogous to how A2A standardizes agent comms. In our architecture, we run a fastMCP server alongside the FastAPI service to host various tools (like internal UBS classifiers, document validators, data fetchers, etc.). Agents will use the fastMCP client library (in Python) to call these tools within their task logic. fastMCP Basics: An MCP server exposes “tools” – which are essentially functions or actions the LLM agent can call. Each tool has a name, input parameters, and output schema. For example, we might have a tool classify_document(text: str) -> str that returns a risk category, or verify_id(document: file) -> bool. The fastMCP framework makes it easy to wrap Python functions as remote-invocable tools
+gofastmcp.com
+datacamp.com
+. The server handles receiving a JSON-RPC call for a tool, executing the function, and returning the result (possibly streaming partial results if the tool is long-running). Anthropic describes MCP as a “USB-C port for models” – it standardizes plugging in any external capability using a common protocol
+huggingface.co
+. How Agents Call Tools: Within an agent’s implementation (which could be a Python class or an LLM prompt with function-calling capabilities), when the need for a tool arises, the agent will invoke the fastMCP client. There are a couple of patterns to do this:
+Programmatic calls: If the agent’s logic is written in Python (for example, a hard-coded sequence or a custom policy), it can directly call a tool function provided by the MCP client. For instance, we might import a tools_client from fastMCP, then do something like:
+result = tools_client.call("classify_document", {"text": doc_text})
+This would send a JSON-RPC request to the fastMCP server (running on localhost, say port 8001) to execute the classify_document tool with the given input. The call blocks until the result is returned (or yields intermediate updates if streaming). The agent’s code then takes result and incorporates it into its response message or artifact.
+LLM function-calling: If the agent is powered by an LLM that can decide to use tools (like OpenAI’s function calling or a LangChain agent), we can integrate MCP by registering tools in the prompt context. For example, we could give the LLM a tool list and whenever it outputs an “action” to use a tool, our agent runner will catch that and perform the MCP call, then feed the result back to the LLM. Libraries like LangChain or Google’s Agent Development Kit (ADK) facilitate this. In the HuggingFace tutorial reference, they created an ADKAgent that holds a list of tools and a ToolContext – when the LLM wants to use a tool, it’s handled behind the scenes by calling the MCP server
+huggingface.co
+huggingface.co
+. This approach allows the LLM to choose when to use a tool (based on its training and the conversation) rather than predefining it in code.
+Regardless of approach, the fastMCP server acts as a secure execution environment for tools. Our FastAPI agent backend will be configured with the address of the fastMCP server (e.g., FASTMCP_URL = "http://localhost:9000" or similar). Each agent that needs tools will have access to the fastMCP client. We might instantiate a global FastMCPClient in the app that knows how to reach the server and use it within agents. Example Tool Call Flow: Suppose the user asks the “Document Analyzer” agent to “Classify this document for compliance and provide a summary.” The agent will need to classify the document (maybe using an internal ML model via MCP) and also generate a summary (which the LLM itself can do). A possible flow:
+The agent receives the request (through A2A as a task). It sees that classification is needed. It calls tools_client.call("classify_document", {"text": document_text}).
+The fastMCP client sends this request to the fastMCP server. The server executes the classify_document function (which might be a wrapper around a pre-trained classifier or rule-based logic). Let’s say it returns "HIGH_RISK".
+The agent gets this result and now knows the document’s category. It then proceeds to generate a summary (which it can do with its LLM capabilities). The summary might not require an external tool, the agent can do it itself.
+The agent prepares its response to the user: e.g., a text message saying “This document is classified as HIGH_RISK. Summary: ...” or perhaps it returns a structured artifact like:
+"artifacts": [{
+    "artifactId": "...",
+    "name": "Analysis.json",
+    "parts": [
+      {
+        "kind": "data",
+        "data": { "classification": "HIGH_RISK", "summary": "Lorem ipsum..." }
+      }
+    ]
+}]
+This artifact contains both the classification and summary.
+The client receives the result via A2A (as a normal message or artifact in the Task).
+From the client’s perspective, the agent just performed its skill. The internal MCP call is abstracted away – which is correct per A2A’s philosophy of agents not exposing their internal tools directly
+ibm.com
+. We don’t list MCP tools in the Agent Card; instead, we describe the high-level skill (“Document Classification”) that the agent offers, which underneath uses the tool. A2A Workflows with Tools: It’s worth noting that an agent’s use of MCP tools can be combined with A2A multi-agent workflows. For example, one agent might solve part of a task and then delegate another part to a second agent via A2A, and that second agent might use MCP to fetch data. The protocols are complementary, not competing
+blog.dailydoseofds.com
+blog.dailydoseofds.com
+. Our marketplace could in the future host a “coordinator agent” that accepts a complex job and internally orchestrates multiple specialized agents (via A2A calls between them) and tools (via MCP) to complete it. This scenario would involve our FastAPI service acting as both an A2A server (for the coordinator) and A2A client (calling the worker agents) – which is advanced but feasible. For now, integration with MCP in our system will be synchronous tool calls made by an agent’s code. This is straightforward to implement and aligns with how many current frameworks use tools. If a tool can take long or produce streaming outputs, fastMCP supports streaming responses (often via SSE as well)
+gofastmcp.com
+. We can handle that by, say, receiving partial results from the client call and forwarding them to the user (perhaps as artifact-update events). However, a simpler approach is to treat tool calls as blocking from the agent’s perspective – the agent might send an interim “working…” status to the client, call the tool, and then send the final results. Security and Sandbox for Tools: The fastMCP server will be configured to host only approved tools (like internal UBS functions) and likely run with restricted permissions. We will ensure the agent cannot execute arbitrary code beyond the provided tools (MCP helps here because only pre-registered functions are exposed). The communications between the agent and MCP server can be authenticated as well (e.g. via an API key or token the MCP server expects). Since in our dev setup everything is localhost, this might not be a concern, but in deployment we’d secure it. Tool Schema and Logging: Each MCP tool can be documented (fastMCP can auto-provide a schema of tools). We may link tool usage to agent tasks for audit. For example, when an agent calls a tool, we can log an event “Agent X used Tool Y on Task Z” with parameters. This is useful for debugging and compliance. In summary, agents call tools via fastMCP by using local Python function proxies that send JSON-RPC to the tool server. The results are obtained and embedded into the agent’s A2A responses. This design cleanly separates responsibilities:
+The MCP server is the only component with direct access to databases, external APIs, or sensitive resources (through the tools), and it can be secured and monitored separately.
+The agent focuses on the reasoning and conversation aspect, deciding when to use which tool, and interpreting the results.
+The A2A client (user or orchestrator) doesn’t need direct access to the tools or data – they only see the final outcome provided by the agent, maintaining abstraction and security.
+This approach follows the intended usage of A2A + MCP: small, focused agents that can “see the bigger picture” by utilizing tools when needed
+huggingface.co
+. Our platform’s role is to wire these pieces together seamlessly. Next, we’ll discuss how the system handles streaming responses, multi-turn dialogues, and artifact transfers in detail.
+Multi-turn Conversations, Streaming Responses, and Artifact Exchange
+Multi-turn Conversations: As described in the task lifecycle, an agent can engage in a back-and-forth dialogue within a single task. The A2A protocol explicitly supports this via the input-required task state and message exchange within a task
+a2aprotocol.ai
+. Our implementation details:
+When an agent cannot complete a task without more user input (additional info or clarification), it will respond with a partial result:
+The Task status is set to input-required, and an agent message is included asking the question. For example, status: { state: "input-required", message: {role: "agent", parts: [ ...question...] } }
+a2aprotocol.ai
+a2aprotocol.ai
+.
+The FastAPI server returns this in the JSON-RPC response to the client. The client agent or application should detect this state and prompt the user (or otherwise gather the info).
+The task on our side remains open (not completed). It will be marked in our store as awaiting input.
+When the client provides the answer (via a new message/send with the taskId), our handler will attach that as a new user Message in the task history and wake up the agent to continue processing. (If our agent logic is synchronous, we might actually hold the request until input arrives, but more practically we’ll complete the first request with input-required, and handle the follow-up request as a continuation.)
+The agent resumes, possibly going through multiple such cycles. Each time, we update the Task status accordingly (you could imagine working again when it resumes).
+Finally, when the agent has everything it needs and produces the result, we mark the task completed and return the output.
+Throughout a multi-turn task, the Task.history is accumulating the messages from both sides. We will include that in responses as appropriate, so the client can see context if needed. (However, the messages are also individually delivered, so history is more for record-keeping or late joiners.) The Agent Card can advertise that the agent might require multiple turns for certain skills, but usually this is understood from the skill description (e.g. a skill “Book a flight” likely needs details like dates and destinations). Streaming Responses (Server-Sent Events): For tasks that produce large outputs or continuous updates, our platform supports streaming via SSE. The client signals interest in streaming by using the message/stream method (or we could also allow a query param like ?stream=true on the request). Under the hood, FastAPI will respond with Content-Type: text/event-stream and stream events rather than a single JSON response
+a2aprotocol.ai
+a2aprotocol.ai
+. Here’s how we implement streaming in alignment with A2A:
+When a message/stream request comes in, we start processing the task as usual (creating a Task in working state). But instead of waiting until completion to return anything, we flush incremental updates to the HTTP response as SSE events.
+The SSE events are text lines beginning with data: (per SSE format). Each event will carry a JSON snippet of a Task update or a Message/Artifact. The A2A spec defines event types like TaskStatusUpdate and TaskArtifactUpdate events for streaming
+a2aprotocol.ai
+. In our JSON payloads, we include a field like "kind": "status-update" or "kind": "artifact-update" to denote the type of event.
+Initially, we might send a status update event to confirm the task started. For example, Event 1 could be:
+{
+  "jsonrpc": "2.0", "id": 1,
+  "result": {
+    "id": "task-123",
+    "status": { "state": "working", "timestamp": "2025-07-28T23:45:00Z" },
+    "history": [ { ...initial user message... } ],
+    "kind": "task"
+  }
+}
+This tells the client the task ID and that it’s in progress
+a2aprotocol.ai
+a2aprotocol.ai
+. (We might use state: "submitted" then quickly to "working"; either way, the client knows the task is accepted.)
+As the agent generates output, we send artifact update events. For instance, if the agent is streaming a lengthy answer or document, it can send it in chunks. Each chunk would be an event containing something like:
+{
+  "jsonrpc": "2.0", "id": 1,
+  "result": {
+    "taskId": "task-123",
+    "artifact": {
+      "artifactId": "artifact-xyz",
+      "parts": [ { "kind": "text", "text": "partial output..." } ]
+    },
+    "append": true,
+    "lastChunk": false,
+    "kind": "artifact-update"
+  }
+}
+Here, append: true means “append this to the previous artifact content,” and lastChunk: false indicates more chunks will follow
+a2aprotocol.ai
+a2aprotocol.ai
+. The client can concatenate these parts to reconstruct the full output progressively.
+We continue sending artifact-update events for each chunk of content. If the agent is an LLM that streams its generations token by token, we might buffer to send at least a sentence or paragraph per event to avoid overhead.
+Optionally, we could also send intermediate status events (e.g., progress percentage or state changes) as status-update kind events.
+Finally, when the agent finishes, we send a final status update event:
+{
+  "jsonrpc": "2.0", "id": 1,
+  "result": {
+    "taskId": "task-123",
+    "status": { "state": "completed", "timestamp": "2025-07-28T23:45:30Z" },
+    "final": true,
+    "kind": "status-update"
+  }
+}
+Setting "final": true (or lastChunk: true on the last artifact event) signals to the client that the stream is complete and the connection will close
+a2aprotocol.ai
+a2aprotocol.ai
+.
+The server then closes the SSE connection.
+On the client side, using SSE (e.g. via EventSource in a web app or an SSE client library), they will receive each data: event and parse the JSON. This gives a real-time feed of results, which is great for, say, showing a draft of a report as it’s being written by the agent, or streaming a conversation answer for responsiveness. Our SSE implementation will follow the A2A guidelines:
+The first SSE event is effectively the JSON-RPC response header (with task info)
+a2aprotocol.ai
+.
+Subsequent events contain results with kind: "artifact-update" or kind: "message" if the agent sends intermediate messages.
+We ensure the id in the JSONRPC envelope remains the same (matching the request ID) for all events of that stream.
+If an error occurs mid-way (tool failure, exception), we can send an SSE event with an "error" field or a status-update to failed, then close the stream with final:true. The client should handle that as a failed task.
+FastAPI makes SSE fairly simple (we can use StreamingResponse with an async generator that yields event strings). We need to set appropriate headers (Cache-Control: no-cache etc.) and handle heartbeats if needed for very long streams (periodic comment lines or so to keep connection alive). Given our use cases (probably minutes at most, not days of streaming), that should be fine. Artifact Exchange: Handling artifacts (especially binary files) requires some additional infrastructure:
+Incoming Artifacts: If a client needs to send a file to an agent (e.g. “analyze this PDF”), A2A allows file parts in the input message. As seen in the streaming example, the client could include a FilePart with data as base64
+a2aprotocol.ai
+a2aprotocol.ai
+. Our server will need to accept that. FastAPI can handle base64 JSON content or even an out-of-band file upload if we design it. Initially, supporting base64 in JSON is easiest (small files or images). For large files, a better approach is to allow the client to upload the file to a temporary URL and then pass a URI in the A2A message (like a pre-signed S3 link). But that might be over-engineering for now. We’ll note that large file uploads via JSON could bloat memory, so for production we’d implement a separate file upload endpoint referenced by artifact URI.
+Storing and Serving Outgoing Artifacts: When an agent generates a file artifact (say it creates a CSV report or an image), our agent logic will have that binary data (maybe as a file on disk or bytes in memory). We have two options:
+Inline base64: For small outputs, we can directly base64 encode and include it in a FilePart’s data field. This makes the JSON response large, but self-contained. Good for maybe <1MB files or so.
+Generate a link (recommended for larger artifacts): The platform can save the file (e.g. in a protected cloud storage bucket or local static/ directory) and then provide a temporary URL. As per A2A, we can include that in the FilePart’s uri field
+a2aprotocol.ai
+. We should add some security – e.g., the URL might contain a token or be gated by an auth check. The Agent Card’s capabilities.extensions could even list support for a specific file download extension if needed.
+We will implement a simple solution: store the artifact file on the FastAPI server (or an attached storage) and expose an endpoint like GET /agents/{id}/tasks/{task_id}/artifacts/{artifact_id}. This endpoint will require the same auth (or a token parameter) to ensure only the intended recipient can download. The artifact’s FilePart uri will point to this endpoint (including a short-lived token or referencing the user’s auth). When the client hits that URI, we will respond with the file bytes and appropriate Content-Type. This separates file transfer from the main JSON response, which is good practice.
+Artifact Metadata: We’ll include file names and MIME types in FileParts so the client knows what it is (e.g., name: "report.pdf", mimeType: "application/pdf" in the artifact part). This is shown in A2A examples where they either returned a data URI or a storage link
+a2aprotocol.ai
+.
+Partial Artifact Updates: In streaming, as illustrated, we might deliver an artifact piecemeal (especially if it’s being generated on the fly, like a multi-page report). We tag append=true so the client knows to concatenate. If append=false and lastChunk=false, that could mean we’re replacing the previous content (not common, but A2A allows some flexibility – mostly we’ll use append for text). We have to maintain consistency of artifactId across chunks so the client knows they belong to the same artifact
+a2aprotocol.ai
+a2aprotocol.ai
+.
+Push Notifications (Webhooks): While SSE is client-driven (client stays connected), A2A also supports push notifications for asynchronous completion. We likely will implement SSE primarily (as it’s simpler for interactive clients). However, for completeness:
+The client can set a webhook via tasks/pushNotificationConfig/set with a URL and a token
+a2aprotocol.ai
+.
+Our platform will store this mapping. If a task is submitted with push config and the client disconnects, when the task completes we will send an HTTP POST to the provided URL with the Task result
+a2aprotocol.ai
+. This POST will include an auth header (maybe a signed JWT from our side, or just the X-A2A-Notification-Token they gave) so the client can trust it
+a2aprotocol.ai
+.
+We’d include the final Task JSON in the body. The client’s service can then process it (e.g., notify a user or trigger the next step in a workflow).
+We will follow the security suggestions: e.g., if the client provided a token and expected an Authorization header scheme, use that
+a2aprotocol.ai
+.
+Implementing this requires our task manager to have a background job or callback when task finishes. In FastAPI we can achieve this with an async task or a thread for the long task, then on completion do an HTTP request (or better, use an HTTP client in the server to call out). Since this is internal network, it should be okay.
+Given our medium-term goal and that SSE covers many cases, we might not emphasize push in the first version (SSE is easier to test locally). But we design with it in mind (the Agent Card capabilities.pushNotifications will be true if agent can do it
+a2aprotocol.ai
+, and we include the API to set it). This keeps us enterprise-ready for cases where long tasks need to survive disconnections. Example SSE flow: To illustrate, suppose a client asks an agent to generate a lengthy report. The client uses SSE:
+It sends the request with message/stream. Our server responds with an HTTP 200 and begins streaming events.
+The client receives:
+data: { "result": { "id": "task-001", "status": {"state":"working"} , ... } } (task started)
+data: { "result": { "artifact": { "artifactId": "A1", "parts": [ { "kind":"text", "text": "Report Introduction..." } ] }, "append": false, "lastChunk": false, "kind": "artifact-update" } }
+data: { "result": { "artifact": { "artifactId": "A1", "parts": [ { "kind":"text", "text": "Report Body part 1..." } ] }, "append": true, "lastChunk": false, "kind": "artifact-update" } }
+... (more chunks) ...
+data: { "result": { "artifact": { "artifactId": "A1", "parts": [ { "kind":"text", "text": "Report Conclusion." } ] }, "append": true, "lastChunk": true, "kind": "artifact-update" } }
+data: { "result": { "status": {"state":"completed"}, "final": true, "kind":"status-update" } }
+The client concatenates all text parts for artifact A1 in order and gets the full report content. The final event indicates completion and the SSE connection ends gracefully
+a2aprotocol.ai
+a2aprotocol.ai
+.
+This matches the flow outlined in the A2A spec’s streaming example
+a2aprotocol.ai
+a2aprotocol.ai
+. Our implementation will aim to mirror that behavior. In summary, our platform will support rich, stateful interactions:
+Multi-turn conversations are handled within the Task lifecycle (using states and message exchanges).
+Streaming is provided via SSE, with properly structured events so the client can reconstruct messages or artifacts in real-time.
+Artifacts (files/structured data) are exchanged through the Parts mechanism, either inline or via secure links, without breaking the JSON-RPC flow.
+These capabilities ensure the system can handle everything from quick question-answer calls to lengthy collaborative processes.
+Security and Authentication Considerations
+Security is paramount since these agents may have access to sensitive internal data and actions. We will implement multiple layers of security, aligning with A2A’s “secure by default” principle
+developers.googleblog.com
+ and enterprise best practices: Authentication of Clients: We will require that any client (whether it’s an end-user application or another agent) authenticate when calling our FastAPI endpoints. The JWT (Bearer token) approach is a good fit, as mentioned. Concretely:
+The FastAPI backend will validate an Authorization: Bearer <token> header on every incoming request (GET or POST). The JWT will be signed by our identity provider (UBS auth system) and include claims about the user or client agent.
+We’ll integrate a middleware or dependency in FastAPI to check the token signature and claims. If invalid or missing, requests are rejected with 401 Unauthorized.
+The required scheme (bearer, OAuth2, etc.) will be documented in each agent’s Agent Card under securitySchemes
+ibm.com
+. For example, as shown above, we might include a scheme named "BearerAuth" of type http with scheme bearer. The Agent Card’s security array would then indicate that scheme is required
+linkedin.com
+. This way, an A2A client knows it must include the JWT. (If we had public agents with no auth, security could be empty, but likely all our agents are internal and require auth.)
+Optionally, we can scope tokens per agent. For instance, a token could have a claim like agent:doc-analyzer to only allow access to that agent. Or we use internal service-to-service auth where the marketplace has its own auth layer. Given corporate practice, using a single JWT that encodes user identity and roles is typical; we can enforce authorization logic such as “User X can only invoke certain agents or certain skills.” However, to keep it straightforward, initially any authenticated user with a valid token can call any agent. Fine-grained access control can be added later if needed (maybe based on agent tags like “finance-data” that only certain roles can use).
+We should also serve everything over HTTPS (in production) to prevent eavesdropping or tampering. This is inherent if behind corporate API gateways or using TLS on our server.
+Agent-to-Agent Auth: If our marketplace agent calls an external agent via A2A (not immediately planned, but possible), it would have to handle auth as a client. For now, we assume our platform is mainly hosting the agents, and clients are either users or other internal systems. In an A2A network, the Agent Card could advertise an OAuth2 flow or API key needed
+ibm.com
+; our client code would have to go get a token. Since we’re in one organization, we might issue service tokens for inter-agent calls. This is a future consideration. fastMCP Server Security: The tool server should also require auth for tool invocation, especially if it can perform privileged actions (like database queries). We can handle this by:
+Running the fastMCP server on an internal network interface or behind firewall so only the FastAPI backend can reach it.
+Or issuing the FastAPI service a secret/API key to include in tool requests. If using fastMCP’s built-in features, we might set an auth token that the client attaches to each call.
+Since the user ultimately triggers tool usage through the agent, we might also propagate the user’s identity to the MCP calls for auditing (e.g., include a header or part of the params indicating who is requesting), if the tools need it. But typically tools might not need to know user identity if the agent is authorized.
+Input Validation and Sanitization: Agents will receive input from users – which could be malicious or malformed. We must ensure:
+The JSON parser is robust and the Pydantic models validate types. The A2A SDK (if used) can validate e.g. that role is either "user" or "agent", that required fields are present, etc. We’ll return proper JSON-RPC errors like -32602 Invalid params if something is off.
+If the user uploads a file, we should scan it if needed or at least not pass dangerous content to tools unchecked (for example, if there’s a tool that executes code from a file – we likely won’t have such a tool, but be mindful).
+Our tools themselves (running via MCP) should sanitize their outputs (e.g., if a tool queries a database, guard against injection – though using parameterized queries in code avoids that).
+The agent’s LLM output should also be monitored for compliance (since internal use, we might have moderation or simply rely on prompt design to avoid certain content). But this strays into AI safety; technically not the API architecture, but something to note for internal policy (maybe a filter as a tool itself).
+Authorization and Roles: The Agent Card concept allows describing auth requirements but doesn’t enforce actual ACLs – that’s on us. Some agents might have more sensitive capabilities (like one that can execute automation in production systems). We could implement an authorization layer where we check the user’s roles/permissions before allowing access to certain agents or skills:
+For example, tag an agent or skill as “admin-only” and look at JWT claims to allow or deny.
+This isn’t specified by A2A, but we can incorporate it internally.
+At a minimum, the plan is to use JWT verification for every call, and possibly an API gateway in front of FastAPI that already does auth and rate-limiting. We will follow UBS standard practices (likely JWT with internal IdP, short token lifespans, etc.), and integrate with their logging/monitoring for security events. Data Privacy and Opaque Agents: One advantage of using A2A as intended is that agents do not share their internal data or logic directly
+ibm.com
+. Each agent only communicates via messages/artifacts which we can monitor. There is no direct database access given to clients – everything goes through controlled tools. This containment is a security feature (reducing the surface for data leakage). We will ensure that, for instance, one agent cannot accidentally expose another agent’s internal state – they only communicate through A2A tasks if allowed. Audit Logging: We plan to log key actions:
+When a task is started, log which user or system initiated it, which agent was called, and the input (perhaps sanitized).
+When a task completes, log the outcome (success/fail) and possibly store the artifacts or summary for compliance (depending on data sensitivity).
+Tool calls via MCP can be logged by the MCP server, but we might also log from the agent side when a tool is invoked and what result came (especially if the tool accesses confidential info, we need an audit trail of access).
+These logs can be stored securely and used for troubleshooting or demonstrating compliance with data handling rules.
+Websocket/Socket Security: SSE and webhooks both have their own considerations:
+SSE is one-way server push; it’s on an open HTTP response. We should ensure the client’s JWT remains valid for the duration of the SSE. If a long task could exceed token expiry, we might need a mechanism to re-auth or accept that since connection was established, it’s okay. Possibly issuing tokens with a slightly longer life for streaming tasks, or requiring refresh mid-stream (complicated, likely not needed if tokens last an hour and tasks <1h).
+Webhook endpoints (client side) should verify the authenticity of our calls. We will provide an HMAC token or use the client-provided token to sign the callback. The Agent Card’s security info for push could hint how we authenticate to their webhook (e.g., use an OAuth client creds flow, but likely we keep it simple with a token secret). The example push config shows an authentication field where one can list schemes like "Bearer"
+a2aprotocol.ai
+ – we can support sending a Bearer token header or whatever is specified.
+CORS and Network Security: If the front-end (say a web UI on another domain) calls our FastAPI directly (with user JWT), we must configure CORS properly. Since this is internal, maybe not an issue, but worth noting. Similarly, the MCP server likely only listens locally or on a protected network, and FastAPI calls it internally (so not exposed to internet). Scalability & Hardening: We should design to prevent abuse:
+Rate limiting: Add rate limits per user or per agent to avoid someone spamming heavy tasks (especially if those tasks use expensive LLM calls or tools). This could be done at API gateway or in FastAPI using a plugin.
+Input size limits: Avoid someone sending a 500MB base64 file in a single request unexpectedly. We can set a request size limit. For large data, encourage using streaming or chunked upload outside of A2A.
+Timeouts: Have sensible timeouts for tasks. If an agent hasn’t responded in, say, 2 minutes, perhaps mark task as failed (or use push to notify when eventually done). We don’t want to tie up resources indefinitely. Similarly, tool calls will have their own timeouts.
+Isolation: In future, each agent could run in its own container/process for isolation, so one agent crash or memory leak doesn’t take down others. In the monolithic FastAPI for dev, at least logically separate them.
+We have thus covered ensuring only authenticated, authorized requests reach agents, and that communications and data are handled safely. The Agent Cards make it clear which auth method is needed (and they can evolve as we adopt enterprise auth standards – A2A supports OAuth2 and OIDC configuration as well
+ibm.com
+). With security in place, we can now consider some additional aspects for scalability and standards compliance.
+Scalability, Extensibility, and Standards Compliance
+To make this system robust in the medium term, we should build it in a scalable and extensible manner:
+Containerization & Deployment: Each component – the FastAPI agent server and the fastMCP server – will be containerized (Docker). In Kubernetes, we can run multiple replicas of the FastAPI service behind a load balancer. Because the agents are stateful in terms of tasks, we need to think about task distribution:
+If stateless (quick) tasks, any instance can handle any request. We just ensure agent registration is shared (e.g., stored in a database or in a config that all instances load).
+For long tasks with streaming, sticky sessions might be needed (since SSE over HTTP/1 tends to stick to one pod). Using a service that supports HTTP/2 could allow multi-stream multiplexing. A simpler approach: when a client connects for SSE, it will hit a specific instance and stay connected; our load balancer should allow that (most do).
+We might also use a message broker for task work distribution if needed – e.g. FastAPI instance puts a task into a queue and a worker (which could be itself or another) processes it, allowing scaling workers separately from front-end API. This is more complex and probably not needed until load is high.
+State Management: In the current design, task state (history, status, artifacts) can be kept in memory (a Python dict or so) since it’s short-lived. However, for reliability and scaling out, a persistent store is recommended:
+Use a database or distributed cache (Redis) to store task info. For example, when a task is created, save its status and partial results in Redis so that if the process restarts or another instance needs to pick it up, it can.
+This also allows resuming after crashes and sharing load. If we had a separate worker process handling tasks, it would update the DB/Redis.
+Given tasks can potentially last hours (with human input delays), persistence is important. We may implement a tasks table with task_id, agent_id, status, created_time, updated_time, etc., and possibly store artifacts or a reference to artifact storage.
+At minimum, we should design our Task manager to have clear interfaces so we can swap an in-memory store with a persistent one when needed.
+Agent Scalability: We should consider scaling each agent independently. If one agent (say a data analysis agent) is heavily used, we might want multiple instances of it running. Within one FastAPI app, that could mean the agent logic is stateless and each request is separate (e.g., calling an external API or LLM each time). Then it’s just a matter of the FastAPI app auto-scaling under load.
+If an agent holds a lot of in-memory data (like a big index), it might be better to break it out into its own service. Our marketplace should be able to route tasks accordingly. For now, all agents share the same process, but designing a bit of abstraction (like an AgentInterface class that either processes locally or calls a remote service) could future-proof this.
+A2A’s vision is cross-vendor interoperability, so in the future we might register an agent whose url is not our local host but some external endpoint. Our discovery endpoint could list it (with its URL). The client would then call it directly. So the marketplace can also act as a registry for external agents if needed. We mention this to note that our data model and registry should accommodate agents not hosted by us, though initially all are local.
+Extensibility (Adding New Agents/Skills): The system should make it easy to introduce new agents or update skills:
+Use a modular design: perhaps each agent is defined in a separate module or file, with its Agent Card and handler logic. A new agent can be added by dropping in a new module and registering it.
+For agents powered by LLMs, we might use a common agent base class that handles prompt generation and uses a certain model. Then customizing an agent is a matter of providing prompt templates or fine-tuned model paths and tool list.
+Embrace the A2A AgentCard schema fully – that means if tomorrow A2A adds new fields (like agent icon, or extended skills metadata), we can include those. Using pydantic models from the official SDK (if available) can help maintain compatibility.
+If we want to integrate with other open standards like the upcoming OpenAI function calling or LangChain’s agent schemas, we can map them to A2A concepts. For instance, an OpenAI plugin manifest .well-known/ai-plugin.json could be auto-generated from our Agent Card or vice versa, since they have overlapping info (this isn’t required, but could widen compatibility with other ecosystems).
+The A2A spec is evolving (still v0.x). We will keep an eye on changes (like formal auth in AgentCard, or new methods like querySkill mentioned in roadmap
+github.com
+). Designing our code with versioning in mind is prudent – e.g., store a protocolVersion and if we later update to 1.0, we might host both for backwards compat.
+Compliance with Standards: We have essentially built around A2A and MCP, which themselves are open standards backed by major players (Google, Anthropic, etc.). By using them, we inherently stay compliant:
+JSON-RPC 2.0: We must ensure strict adherence (always include "jsonrpc": "2.0", handle the id correctly in responses, return standardized error codes). The A2A spec defines custom error codes (e.g., -32001 for Task not found)
+a2aprotocol.ai
+ – we will implement those where relevant.
+HTTP standards: Use proper status codes. For SSE, follow the text/event-stream format exactly. For file downloads, set correct Content-Type and maybe Content-Disposition for convenience.
+OpenAPI Auth compliance: As noted, we describe auth in Agent Cards in OpenAPI terminology, making it easier for others to understand and for future tooling (maybe an A2A registry or directory) to parse
+ibm.com
+.
+MCP compliance: If our tools are to be usable by e.g. Anthropic’s Claude directly, we should run a legitimate MCP server. Using fastMCP ensures that – it handles the MCP protocol specifics (which uses JSON-RPC, with some conventions for prompts and such). We just have to define tools clearly. In the future, if we expose our MCP server to external models, we might need to add authentication on it too (similar to plugin keys).
+Monitoring and Observability: Scalability isn’t just about handling load, but also about being able to observe and debug:
+Implement logging (which we discussed for audit) but also metrics. For example, track how many tasks each agent completes, task durations, error rates. We can expose Prometheus metrics or similar from FastAPI to feed into dashboards.
+Use tracing if possible – e.g., if a task involves multiple calls (maybe to MCP or to other agents), having a correlation ID (the taskId serves that purpose) and logging it everywhere helps trace flows.
+The Agent Card could even include an observability endpoint if we wanted (not in A2A spec, but we could list an extension under capabilities.extensions with a URL for monitoring data, but that’s custom).
+Testing and Validation: Provide a test suite for agents. We can use the A2A Python SDK to simulate a client calling our agents, verifying that the responses conform to schema. For each agent, we can write sample message/send calls and ensure the outputs (and intermediate states) are as expected. This also helps ensure that when we scale or refactor, we don’t break A2A compliance.
+In terms of compliance with open standards, by designing around A2A and MCP:
+We ensure interoperability: any external agent or client following A2A can interact with our agents. For example, if in the future IBM’s orchestrator wants to incorporate our agent, it can fetch the Agent Card and delegate tasks to it with minimal custom integration. A2A acts as the “API” for our agents, much like REST was for microservices
+ibm.com
+.
+We reduce vendor lock-in: our implementation could swap out the underlying model provider (say from OpenAI to an open-source LLM) and tools, but as long as the interface remains A2A, clients won’t notice any difference.
+We also contribute to open standards by adhering to them – if any issues arise (like something not well-defined in spec), we’d handle it in a way that aligns with community best practices (monitoring A2A GitHub discussions, etc.).
+To wrap up, here’s a checklist of requirements that each agent in our marketplace must satisfy to be compatible with the architecture and A2A standard:
+Agent Compatibility Checklist
+Agent Card Provided: Every agent must have a complete AgentCard JSON defining its name, description, version, endpoint URL, supported skills, input/output modes, and security requirements. This card should be hosted at /.well-known/agent.json under the agent’s base path
+huggingface.co
+. (Ensure the card is kept in sync with the agent’s actual capabilities and updated whenever skills or auth change.)
+Implements A2A Methods: The agent’s service endpoint (e.g. the FastAPI route) must handle at least the core JSON-RPC methods:
+message/send for receiving a task/message,
+message/stream for streaming tasks (if streaming is advertised),
+tasks/get for status queries (especially if long tasks are possible),
+tasks/cancel (if tasks can be long or if cancellation is useful),
+tasks/pushNotificationConfig/set (if push is advertised).
+It should return responses in the format specified by A2A (JSON-RPC 2.0 envelopes containing Message or Task objects, etc.)
+docs.telex.im
+a2aprotocol.ai
+. Use correct error responses on failures (e.g., MethodNotFound for unknown methods, InvalidParams for bad inputs)
+docs.telex.im
+docs.telex.im
+.
+Messaging Format Compliance: The agent should only produce messages with valid structure:
+Each Message must have a role of “user” or “agent”
+ibm.com
+,
+Use one or more Parts for content (and only the defined part types: TextPart, FilePart, DataPart)
+ibm.com
+,
+Include a unique messageId for each message.
+If the agent sends a message referencing or continuing a task, include the taskId in it. When sending artifacts, follow the Artifact schema (with artifactId, parts, name, etc.)
+a2aprotocol.ai
+.
+Task State Management: The agent must correctly handle the Task lifecycle:
+Mark tasks as completed when done (and include all final artifacts in the response).
+Use input-required state when awaiting more info
+ibm.com
+ibm.com
+.
+Use failed if an error occurred that prevents completion (and optionally provide an error message in the Task status).
+Optionally use working to notify long processing. The agent should be able to send intermediate status updates for long tasks (either via SSE or on polling).
+Support task cancellation if applicable – e.g., if the agent is performing a lengthy operation and receives a cancel request, it should stop work promptly if possible.
+Streaming Support (if advertised): If an agent’s capabilities indicate streaming: true, it must be able to handle the message/stream method by starting an SSE response and streaming events
+huggingface.co
+. This means flushing partial results as they are ready. Ensure each event is a valid JSON-RPC chunk (with the same id and a portion of the result) and the final event is marked to signify completion
+a2aprotocol.ai
+a2aprotocol.ai
+. Test that the client can reassemble the parts from these events in order.
+Tool Usage via MCP: If the agent needs external tools, it should use the fastMCP client provided. Adhere to the following:
+Only call tools that are registered on the MCP server (avoid undefined RPC calls).
+Wrap tool calls in error handling – e.g., if the tool or MCP server is unreachable or returns an error, catch that and decide how to respond (maybe mark task failed or provide a graceful message).
+Do not expose raw tool responses directly to the client without processing. Interpret the result and incorporate it into the agent’s own response (maintaining the abstraction). For instance, don’t forward an MCP error stack trace; instead, return a friendly error message or a failed task status.
+Ensure any data passed to tools (which may come from user input) is validated or sanitized to protect the tool backend.
+Authentication and Security Compliance: Each agent must enforce the declared security scheme from its Agent Card:
+If securitySchemes says an API key or JWT is required, the agent’s endpoint must check for it. In our centralized architecture, this is handled by FastAPI globally, but the agent should not bypass it.
+The agent should handle auth-required state if applicable. For example, if a client calls without auth, we may respond with a JSON-RPC error or a Task with state auth-required. (This is an A2A feature to negotiate auth if we wanted to, but typically we’ll just 401 at HTTP level.)
+Agents should not leak sensitive info. They should honor any company data handling policies (for example, if an agent handles personal data, ensure it doesn’t inadvertently log or output it where not intended).
+Performance and Resource Use: Agents should be designed to handle requests efficiently:
+Avoid blocking operations on the event loop (use async for I/O or heavy computations offloaded to threads if needed). This is more of a coding guideline for the agent’s implementation to ensure one slow agent doesn’t hang the whole FastAPI server.
+Free up resources after task completion (e.g., if an agent loads a large model into memory only for a task, consider unloading or using a shared model if possible).
+If the agent uses large models or data, document the requirements so deployment can allocate sufficient memory/CPU.
+Extensibility and Versioning: An agent should specify its version in the Agent Card and ideally maintain backward compatibility for its skills. If an agent’s skill interface changes (e.g., it used to accept plain text and now needs JSON input), consider versioning the agent or skill id. Also, agents should ignore or gracefully handle any unknown extensions in messages, to stay flexible with future A2A changes (unknown fields can be in metadata or extension URIs; agents can just pass them or skip them).
+Testing: Every agent should be tested with sample tasks:
+Verify that calling its endpoint with a sample message/send returns the expected result in the correct format (and that the Agent Card correctly reflects that skill).
+If streaming, test that partial outputs arrive in order.
+If multi-turn, simulate a conversation: send initial request, get input-required, then send follow-up, etc., confirming it reaches completion properly.
+Test tool integration: e.g., if an agent uses a tool, try a scenario where the tool succeeds and one where it fails, ensuring the agent handles both.
+Security test: calls without auth should be rejected; with auth, succeed. If an agent has any role-based restrictions internally, test those.
+By following this checklist, we ensure each agent in the marketplace is a well-behaved A2A citizen and integrates smoothly into the overall platform. Finally, our architecture – with FastAPI, JSON-RPC, SSE, and fastMCP – sets a solid foundation for a modern AI agent ecosystem. It allows horizontal scaling of agent services, easy addition of new agents, and interoperability with other A2A-compliant systems. Using JWT and OpenAPI-like security scheme declarations provides enterprise-grade security integration
+ibm.com
+. Adhering to the A2A and MCP standards means we are aligned with industry direction and can take advantage of community tools, SDKs, and improvements as they emerge. With this technical specification and plan in place, the next steps would be to implement the FastAPI endpoints, define a few initial agents and tools, and iteratively test the end-to-end agent interactions (including streaming outputs and multi-agent workflows) in the localhost setup. This will validate the design before deploying on Kubernetes for broader use. Each component of this design – from Agent Cards to SSE streams – is an important piece to deliver a robust agent marketplace that is scalable, secure, and interoperable with the evolving landscape of AI agents. Sources:
+Google Developers Blog – “Announcing the Agent2Agent (A2A) Protocol” (Apr 2025)
+developers.googleblog.com
+ibm.com
+IBM Blog – “What is Agent2Agent (A2A) Protocol?” (Jul 2025)
+ibm.com
+ibm.com
+ibm.com
+ibm.com
+A2A Draft Specification – Data model definitions (AgentCard, Task, Message, etc.)
+a2aprotocol.ai
+ibm.com
+huggingface.co
+ibm.com
+A2A Sample JSON Responses – Examples of tasks, messages, streaming chunks
+a2aprotocol.ai
+a2aprotocol.ai
+a2aprotocol.ai
+HuggingFace Tutorial – “Agent2Agent and MCP: End-to-End Tutorial” (Apr 2025)
+huggingface.co
+huggingface.co
+Daily Dose of Data Science – “A Visual Guide to A2A Protocol” (Apr 2025)
+blog.dailydoseofds.com
+blog.dailydoseofds.com
+Telex Documentation – A2A implementation notes (endpoints and JSON-RPC usage)
+docs.telex.im
+docs.telex.im
+
+
+
+
+
+
+Sources
+You said:
+ok this is a good start. if i was just putting together the endpoints and models for now (request and resposne models) for a singular agent (with the protocol stuff later), what would you recommend as a first step? 
+ChatGPT said:
+Request for o3 pro
+Reasoned for 4m 51s
+Below is a “minimal‑viable slice” that will let you stand up a single agent on FastAPI, exercise the request/response cycle locally, and keep the door open for full A2A/MCP compliance later. Everything is intentionally simple (no streaming, no task store) so you can iterate quickly.
+
+1 . Pick the scope for Slice #1
+Goal	Include now	Defer
+Expose agent metadata	GET /.well‑known/agent.json (static file or hard‑coded dict)	Dynamic registry
+Send a single user message & receive a single agent reply	POST /message	JSON‑RPC envelope, multi‑turn, tasks, SSE
+Data models	AgentCard, Message, TextPart	File/Data parts, Artifact, Task
+Storage	In‑memory echo of last message	DB/Redis, background workers
+Security	None or dummy API key header	JWT validation, role mapping
+CI tests	One test: send “ping”, expect “pong”	Schema validation suite
+2 . Define the core Pydantic models
+# models.py
+from typing import List, Literal
+from pydantic import BaseModel, Field
+
+class TextPart(BaseModel):
+    kind: Literal["text"] = "text"
+    text: str = Field(..., description="UTF‑8 text content")
+
+class Message(BaseModel):
+    """
+    One chat turn.  Strip to essentials for now.
+    """
+    role: Literal["user", "agent"]
+    parts: List[TextPart]
+
+class MessageRequest(BaseModel):
+    message: Message
+
+class MessageResponse(BaseModel):
+    message: Message
+
+class AgentCard(BaseModel):
+    """
+    Super‑light card – enough for discovery.
+    """
+    name: str
+    description: str
+    version: str = "0.1.0"
+    url: str          # base URL where this agent lives
+    protocolVersion: str = "0.0.1-pre"   # placeholder
+    defaultInputModes: List[str] = ["text/plain"]
+    defaultOutputModes: List[str] = ["text/plain"]
+Why not JSON‑RPC yet? – you can wrap the MessageRequest/Response later inside a JSON‑RPC envelope without touching your business logic.
+
+3 . Skeleton FastAPI service
+# main.py
+from fastapi import FastAPI, Depends, Header, HTTPException
+from fastapi.responses import JSONResponse, FileResponse
+from models import MessageRequest, MessageResponse, AgentCard, Message, TextPart
+
+app = FastAPI(
+    title="Local Agent Prototype",
+    version="0.1.0",
+)
+
+AGENT_CARD = AgentCard(
+    name="Echo Agent",
+    description="Replies with a friendly echo of your text.",
+    url="http://localhost:8000",
+)
+
+# --- 1) agent metadata -------------------------------------------------------
+@app.get("/.well-known/agent.json", response_model=AgentCard)
+def get_agent_card():
+    return AGENT_CARD
+
+# --- 2) message endpoint -----------------------------------------------------
+API_KEY = "dev-secret"  # replace later with JWT validation
+
+def check_key(x_api_key: str = Header(..., alias="X-API-Key")):
+    if x_api_key != API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+@app.post(
+    "/message",
+    response_model=MessageResponse,
+    summary="Send one user message and get one agent reply",
+)
+def post_message(
+    req: MessageRequest,
+    _: None = Depends(check_key)  # plug in security later
+):
+    user_text = req.message.parts[0].text
+    reply = Message(
+        role="agent",
+        parts=[TextPart(text=f"🤖 You said: {user_text}")]
+    )
+    return MessageResponse(message=reply)
+Run with:
+
+uvicorn main:app --reload
+Test:
+
+curl -H "X-API-Key: dev-secret" \
+     -X POST http://localhost:8000/message \
+     -d '{"message":{"role":"user","parts":[{"kind":"text","text":"Hello"}]}}' \
+     -H "Content-Type: application/json"
+You’ll receive:
+
+{
+  "message": {
+    "role": "agent",
+    "parts": [ { "kind": "text", "text": "🤖 You said: Hello" } ]
+  }
+}
+4 . Why this slice is useful
+Benefit	Reason
+Fast feedback	You can point Postman / curl / a toy front‑end at /message and see end‑to‑end logic.
+Swagger docs	FastAPI auto‑generates interactive docs at /docs. Stake‑holders can try the API.
+Easy to grow	Add new fields to Message (e.g., taskId) or swap the return type to a JSON‑RPC envelope without rewriting the handler logic.
+Security hook	The Depends(check_key) line is a drop‑in placeholder; replace with a JWT verifier once UBS auth libs are wired in.
+No infrastructure	Runs fully on localhost, single process.
+5 . Guided next steps (incremental)
+Wrap requests in JSON‑RPC
+
+Add a small dependency that parses {jsonrpc, id, method, params}.
+
+Re‑use your existing MessageRequest inside params.
+
+Return {"jsonrpc": "2.0", "id": ..., "result": <current MessageResponse>}.
+
+Introduce a Task model
+
+Generate task_id = uuid4(); return a Task on first call with status=submitted.
+
+Store tasks in an in‑memory dict {task_id: Task}.
+
+Basic multi‑turn
+
+Accept taskId in the incoming Message; look up the existing Task.history; append the new Message.
+
+Server‑Sent Events (streaming)
+
+Add /message/stream that uses StreamingResponse.
+
+Yield partial JSON‑RPC chunks.
+
+Integrate fastMCP
+
+Install the library, configure tools_client.
+
+Inside the business logic block, try calling a stub tool (e.g., reverse a string).
+
+Each step is additive—no big rewrites. Commit after each milestone and write one or two unit tests (FastAPI’s TestClient) so you always have green tests before adding complexity.
+
+Reference Checklist for this slice
+ AgentCard served at /.well‑known/agent.json
+
+ /message endpoint with Pydantic request & response models
+
+ Dummy security hook (X-API-Key) ready to swap to JWT
+
+ Run locally with uvicorn; visible in /docs
+
+That’s it. You can have a fully functioning local agent in an hour, prove the interface, and then evolve toward full A2A + MCP compliance when you’re ready.
+
+
+
+No file chosenNo file chosen
+ChatGPT can make mistakes. Check important info.
