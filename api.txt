@@ -1,0 +1,67 @@
++-----------------------------------------------------------+
+| POST /v1/forms/extract                                    |
+| Body: form_name, pdf (bytes/base64), criteria             |
++------------------------+----------------------------------+
+                         |
+                         v
++-----------------------------------------------------------+
+| 0) Validate & Register                                    |
+|    - MIME/virus, size, idempotency                        |
+|    - Store PDF; create doc_id                             |
++------------------------+----------------------------------+
+                         |
+                         v
++-----------------------------------------------------------+
+| 1) Azure Doc Intelligence (Layout + Read)                 |
+|    - Per page: tokens, lines, tables, selection marks     |
+|    - Page sizes, polygons                                 |
++------------------------+----------------------------------+
+                         |
+                         v
++-----------------------------------------------------------+
+| 2) Form Type Resolve                                      |
+|    - If form_name supplied → trust it                     |
+|    - Else optional classifier on DI output                |
++------------------------+----------------------------------+
+                         |
+                         v
++-----------------------------------------------------------+
+| 3) Build Field Plan from criteria                         |
+|    For each field:                                        |
+|      - ROI locate:                                        |
+|          a) Template (align anchors → canonical ROIs)     |
+|          b) Label/Table search on DI tokens               |
+|          c) Explicit bbox (if provided)                   |
++------------------------+----------------------------------+
+                         |
+                         v
++-----------------------------------------------------------+
+| 4) Extraction Loop (per ROI)                              |
+|    → call "Extraction Router" (see section B)             |
+|    → returns candidate value(s) + confidence + source     |
++------------------------+----------------------------------+
+                         |
+                         v
++-----------------------------------------------------------+
+| 5) Candidate Selection & Normalization                    |
+|    - Pick best per field by confidence                    |
+|    - Apply validators/normalizers (e.g., SSN/EIN/TIN)     |
+|    - If below threshold → mark low_conf / escalate        |
++------------------------+----------------------------------+
+                         |
+                         v
++-----------------------------------------------------------+
+| 6) Cross-Field / Cross-Page Checks                        |
+|    - Examples:                                            |
+|       · all_pages_value_equal(field="dsid")               |
+|       · require_true(field="signature_present")           |
++------------------------+----------------------------------+
+                         |
+                         v
++-----------------------------------------------------------+
+| 7) Persist & Respond                                      |
+|    - Save fields, bboxes, confidences, engines            |
+|    - Save artifacts (page images, ROI crops) if requested |
+|    - Collect routingStats (DI vs OCR vs VLM)              |
+| → Response: fields[], checks[], artifacts, routingStats   |
++-----------------------------------------------------------+
