@@ -1,0 +1,52 @@
++-----------------------------------------------------------+
+| Input: ROI(page_no, bbox), field_spec, DI results         |
++------------------------+----------------------------------+
+                         |
+                         v
++-----------------------------------------------------------+
+| Gate: compute quality signals from DI tokens in ROI       |
+|   - token_density = covered_area / ROI_area               |
+|   - avg_conf (mean word confidence)                       |
+|   - char_count                                            |
+|   - is_visual (from field_spec: signature/checkbox/seal?) |
++------------------------+----------------------------------+
+            | yes (visual)                     | no (not visual)
+            v                                  v
++-------------------------------+     +----------------------------------+
+| Prefer GPT‑Vision (visual)    |     | Check DI token quality           |
+| (signature/checkbox/seal)     |     | if token_density>=T1 AND         |
+|                                ---->| avg_conf>=T2 AND char_count>=T3  |
++---------------+---------------+     +-------------------+--------------+
+                | yes (use VLM)                         | yes (use DI tokens)
+                v                                       v
+      +----------------------+                    +-----------------------+
+      | Crop ROI image       |                    | Read from DI tokens   |
+      | Prompt VLM w/ JSON   |                    | (digital text path)   |
+      | schema instruction   |                    | value + confidence    |
+      +----------+-----------+                    +-----------+-----------+
+                 |                                            |
+                 | no (not visual OR low DI quality)          | no (poor DI quality)
+                 |                                            v
+                 |                                   +-----------------------+
+                 |                                   | OCR on ROI crop (DI   |
+                 |                                   | Read or alt OCR)      |
+                 |                                   | value + confidence    |
+                 |                                   +-----------+-----------+
+                 |                                               |
+                 +--------------------------+--------------------+
+                                            v
+                                 +-------------------------------+
+                                 | Candidate selection           |
+                                 | - Compare DI vs OCR vs VLM    |
+                                 | - Pick best by confidence     |
+                                 | - If < threshold:             |
+                                 |     · widen ROI (optional)    |
+                                 |     · or escalate to VLM      |
+                                 +-------------------------------+
+                                            |
+                                            v
+                                 +-------------------------------+
+                                 | Output candidate(s)           |
+                                 | value, confidence, source,    |
+                                 | page_no, bbox                 |
+                                 +-------------------------------+
