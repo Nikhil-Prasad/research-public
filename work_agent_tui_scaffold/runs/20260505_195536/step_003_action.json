@@ -1,0 +1,7 @@
+{
+  "action": "finish",
+  "reason": "Mock client completed smoke-test actions.",
+  "tool_name": null,
+  "tool_args": {},
+  "final_answer": "Mock run complete. The driver, tool registry, and event stream are working."
+}

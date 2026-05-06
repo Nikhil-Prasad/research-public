@@ -1,0 +1,8 @@
+{
+  "type": "run_finished",
+  "step": 3,
+  "message": "Agent finished",
+  "payload": {
+    "final_answer": "Mock run complete. The driver, tool registry, and event stream are working."
+  }
+}

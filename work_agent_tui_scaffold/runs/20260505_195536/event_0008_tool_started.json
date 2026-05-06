@@ -1,0 +1,6 @@
+{
+  "type": "tool_started",
+  "step": 2,
+  "message": "Running tool: git_status",
+  "payload": {}
+}

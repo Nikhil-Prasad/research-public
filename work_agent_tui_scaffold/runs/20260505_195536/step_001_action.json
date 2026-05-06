@@ -1,0 +1,9 @@
+{
+  "action": "tool_call",
+  "reason": "Smoke test: list repo root.",
+  "tool_name": "list_dir",
+  "tool_args": {
+    "path": "."
+  },
+  "final_answer": null
+}

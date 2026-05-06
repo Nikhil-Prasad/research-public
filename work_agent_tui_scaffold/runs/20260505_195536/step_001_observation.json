@@ -1,0 +1,18 @@
+{
+  "step": 1,
+  "action": {
+    "action": "tool_call",
+    "reason": "Smoke test: list repo root.",
+    "tool_name": "list_dir",
+    "tool_args": {
+      "path": "."
+    },
+    "final_answer": null
+  },
+  "result": {
+    "tool_name": "list_dir",
+    "ok": false,
+    "result": {},
+    "error": "Path not under allowed roots: /Users/nikhilprasad/crown/work_agent_tui_scaffold"
+  }
+}

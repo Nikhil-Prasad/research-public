@@ -1,0 +1,8 @@
+{
+  "type": "tool_started",
+  "step": 1,
+  "message": "Running tool: list_dir",
+  "payload": {
+    "path": "."
+  }
+}

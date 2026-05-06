@@ -161,3 +161,8 @@ cython_debug/
 
 .DS_Store
 *.pdf
+
+# Large PDF files
+papers/*.pdf
+essential_math_for_ds/*.pdf
+DSA_python/*.pdf

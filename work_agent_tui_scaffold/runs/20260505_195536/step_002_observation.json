@@ -1,0 +1,20 @@
+{
+  "step": 2,
+  "action": {
+    "action": "tool_call",
+    "reason": "Smoke test: check git status.",
+    "tool_name": "git_status",
+    "tool_args": {},
+    "final_answer": null
+  },
+  "result": {
+    "tool_name": "git_status",
+    "ok": true,
+    "result": {
+      "returncode": 128,
+      "stdout": "",
+      "stderr": "fatal: not a git repository (or any of the parent directories): .git\n"
+    },
+    "error": null
+  }
+}

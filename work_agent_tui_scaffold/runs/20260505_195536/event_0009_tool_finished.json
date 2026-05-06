@@ -1,0 +1,15 @@
+{
+  "type": "tool_finished",
+  "step": 2,
+  "message": "Finished tool: git_status",
+  "payload": {
+    "tool_name": "git_status",
+    "ok": true,
+    "result": {
+      "returncode": 128,
+      "stdout": "",
+      "stderr": "fatal: not a git repository (or any of the parent directories): .git\n"
+    },
+    "error": null
+  }
+}

@@ -1,0 +1,117 @@
+workspace:
+  default_repo: /work/forms-agent
+  allowed_roots:
+    - /work
+    - /mnt/c/Users
+    - /tmp
+
+agent:
+  max_steps: 30
+  max_observation_chars: 12000
+  mode: patch-assist
+
+approvals:
+  # In TUI mode, these tools pause until you press 'a' or 'r'.
+  require_tools:
+    - apply_patch
+    - run_sql
+  require_shell_if_contains:
+    - "git apply"
+    - "git checkout"
+    - "python -m forms_agent.run"
+  # In headless CLI mode, required approvals are auto-approved by default.
+  # Change to "reject" if you want CLI mode to avoid these actions.
+  headless_default: approve
+
+shell:
+  enabled: true
+  timeout_seconds: 600
+  allowed_executables:
+    - python
+    - python3
+    - pytest
+    - git
+    - grep
+    - rg
+    - cat
+    - ls
+    - sed
+    - awk
+  allowed_git_subcommands:
+    - status
+    - diff
+    - grep
+    - log
+    - show
+    - branch
+  blocked_substrings:
+    - " rm "
+    - "sudo"
+    - "chmod"
+    - "chown"
+    - "curl"
+    - "wget"
+    - "ssh"
+    - "scp"
+    - "pip install"
+    - "npm"
+    - "conda"
+    - "printenv"
+    - " env"
+    - ".env"
+
+files:
+  max_read_chars: 20000
+  editable_globs:
+    - "src/**/*.py"
+    - "src/**/*.yaml"
+    - "src/**/*.yml"
+    - "configs/**/*.yaml"
+    - "configs/**/*.yml"
+    - "prompts/**/*.md"
+    - "prompts/**/*.yaml"
+    - "prompts/**/*.yml"
+  readonly_globs:
+    - "**/*.py"
+    - "**/*.yaml"
+    - "**/*.yml"
+    - "**/*.md"
+    - "**/*.txt"
+    - "**/*.csv"
+    - "README*"
+  blocked_globs:
+    - "**/.env"
+    - "**/secrets/**"
+    - "**/*credential*"
+    - "**/*token*"
+    - "**/*password*"
+
+patch:
+  enabled: true
+  max_files_changed: 5
+  max_lines_changed: 500
+  require_git_diff: true
+  forbid_doc_id_literals: true
+
+sql:
+  enabled: true
+  readonly: true
+  max_rows: 200
+  blocked_keywords:
+    - insert
+    - update
+    - delete
+    - drop
+    - alter
+    - truncate
+    - create
+    - grant
+    - revoke
+    - merge
+    - copy
+
+mcp:
+  enabled: true
+  allowed_servers:
+    - local_models
+    - doc_tools

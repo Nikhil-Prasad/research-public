@@ -1,0 +1,11 @@
+{
+  "type": "tool_finished",
+  "step": 1,
+  "message": "Finished tool: list_dir",
+  "payload": {
+    "tool_name": "list_dir",
+    "ok": false,
+    "result": {},
+    "error": "Path not under allowed roots: /Users/nikhilprasad/crown/work_agent_tui_scaffold"
+  }
+}

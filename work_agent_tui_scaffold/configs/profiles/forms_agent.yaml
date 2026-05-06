@@ -1,0 +1,64 @@
+name: forms_agent
+
+commands:
+  run_failed_docs: >
+    python -m forms_agent.run
+    --doc-list {failed_doc_list}
+    --output-dir {output_dir}
+
+  eval_outputs: >
+    python -m forms_agent.eval
+    --expected {errors_csv}
+    --actual-dir {output_dir}
+    --output-json {metrics_json}
+
+  run_tests: >
+    python -m pytest -q
+
+repair:
+  max_clusters: 1
+  prefer_files:
+    - "src/forms_agent/use_cases/**/*.py"
+    - "src/forms_agent/prompts/**/*.yaml"
+    - "src/forms_agent/normalizers/**/*.py"
+
+csv_aliases:
+  doc_id:
+    - doc_id
+    - document_id
+    - file_id
+    - document_name
+    - input_doc
+  use_case:
+    - use_case
+    - use_case_id
+    - task
+    - extractor
+    - scenario
+  field:
+    - field
+    - field_name
+    - field_path
+    - output_key
+    - attribute
+  expected:
+    - expected
+    - expected_value
+    - gold
+    - ground_truth
+    - label
+  actual:
+    - actual
+    - actual_value
+    - prediction
+    - predicted
+    - output
+  error_type:
+    - error_type
+    - error_kind
+    - diff_type
+    - category
+  notes:
+    - notes
+    - comment
+    - failure_reason

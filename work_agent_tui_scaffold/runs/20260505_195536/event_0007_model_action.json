@@ -1,0 +1,12 @@
+{
+  "type": "model_action",
+  "step": 2,
+  "message": "Smoke test: check git status.",
+  "payload": {
+    "action": "tool_call",
+    "reason": "Smoke test: check git status.",
+    "tool_name": "git_status",
+    "tool_args": {},
+    "final_answer": null
+  }
+}

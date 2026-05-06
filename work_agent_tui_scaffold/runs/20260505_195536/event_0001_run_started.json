@@ -1,0 +1,10 @@
+{
+  "type": "run_started",
+  "step": null,
+  "message": "Agent run started",
+  "payload": {
+    "repo_root": "/Users/nikhilprasad/crown/work_agent_tui_scaffold",
+    "mode": "patch-assist",
+    "task": "smoke test"
+  }
+}

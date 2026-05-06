@@ -1,0 +1,6 @@
+{
+  "type": "model_started",
+  "step": 2,
+  "message": "Requesting next model action",
+  "payload": {}
+}

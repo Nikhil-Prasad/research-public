@@ -1,0 +1,36 @@
+[project]
+name = "work-agent"
+version = "0.1.0"
+description = "Lightweight pure-Python agentic work VM harness with optional TUI"
+requires-python = ">=3.10"
+dependencies = [
+  "openai>=1.42.0",
+  "pydantic>=2.8.0",
+  "pyyaml>=6.0.0",
+  "prompt_toolkit>=3.0.40"
+]
+
+[project.optional-dependencies]
+tui = [
+  "prompt_toolkit>=3.0.40"
+]
+sql = [
+  "psycopg[binary]>=3.1.0"
+]
+mcp = [
+  "mcp>=1.0.0"
+]
+dev = [
+  "pytest>=8.0.0",
+  "ruff>=0.5.0"
+]
+
+[project.scripts]
+work-agent = "work_agent.cli:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

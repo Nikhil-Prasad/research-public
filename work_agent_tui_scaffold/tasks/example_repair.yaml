@@ -1,0 +1,5 @@
+kind: eval_repair
+repo: /work/forms-agent
+errors_csv: /work/evals/errors.csv
+profile: configs/profiles/forms_agent.yaml
+mode: patch-assist
